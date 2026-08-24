@@ -15,6 +15,7 @@ st.caption('NSE → Trend Template → RS → Leader Score → VCP proxy → CSV
 MIN_TREND = 88.9
 MIN_RS = 80.0
 MIN_LEADER = 85.0
+MIN_VCP_SCORE = 80.0
 MIN_VCP = 80.0
 BATCH = 100
 
