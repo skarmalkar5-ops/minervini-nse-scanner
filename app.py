@@ -6,6 +6,7 @@ from email.message import EmailMessage
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import yfinance as yf
 
 st.set_page_config(page_title='Minervini NSE Scanner', page_icon='📈', layout='wide')
@@ -15,7 +16,6 @@ st.caption('NSE → Trend Template → RS → Leader Score → VCP proxy → CSV
 MIN_TREND = 88.9
 MIN_RS = 80.0
 MIN_LEADER = 85.0
-MIN_VCP_SCORE = 80.0
 MIN_VCP = 80.0
 BATCH = 100
 
@@ -207,7 +207,7 @@ def run_scan(progress):
     if vdf.empty:
         final=pd.DataFrame(columns=list(cand.columns)+['VCP Passed','VCP Score','Base Range %','Range Position %','ATR Change %','Volume Change %'])
     else:
-        final=cand.merge(vdf,on='Symbol',how='inner'); final = final[final["VCP Score"] >= MIN_VCP_SCORE].copy()
+        final=cand.merge(vdf,on='Symbol',how='inner'); final=final[final['VCP Score']>=MIN_VCP].copy()
     final=final.sort_values(['Leader_Score','VCP Score'],ascending=False).reset_index(drop=True)
     final.Symbol=final.Symbol.str.replace('.NS','',regex=False)
     progress(1.0,f'Scan complete: {len(final)} final candidates')
@@ -243,5 +243,45 @@ if st.session_state.results is not None:
     c1,c2,c3,c4,c5=st.columns(5)
     c1.metric('NSE EQ',m['universe']); c2.metric('Trend',m['trend']); c3.metric('RS',m['rs']); c4.metric('Common',m['leaders']); c5.metric('Final VCP',len(f))
     st.subheader('Final candidates'); st.dataframe(f,use_container_width=True,hide_index=True)
+
+    # One-click comma-separated ticker list for Dhan.
+    tickers = [str(x).replace('.NS', '').strip() for x in f['Symbol'].tolist()]
+    ticker_text = ','.join(tickers)
+
+    components.html(
+        f'''
+        <div style="display:flex;align-items:center;gap:10px;margin:8px 0 12px 0;">
+            <button id="copyBtn"
+                style="width:100%;padding:12px 18px;border:0;border-radius:8px;
+                       background:#ff4b4b;color:white;font-size:16px;font-weight:600;
+                       cursor:pointer;">
+                📋 COPY TICKERS
+            </button>
+        </div>
+        <script>
+        const tickerText = {ticker_text!r};
+        const btn = document.getElementById("copyBtn");
+
+        btn.addEventListener("click", async () => {{
+            try {{
+                await navigator.clipboard.writeText(tickerText);
+                btn.innerText = "✅ COPIED — PASTE INTO DHAN";
+                setTimeout(() => btn.innerText = "📋 COPY TICKERS", 2200);
+            }} catch (err) {{
+                const ta = document.createElement("textarea");
+                ta.value = tickerText;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand("copy");
+                ta.remove();
+                btn.innerText = "✅ COPIED — PASTE INTO DHAN";
+                setTimeout(() => btn.innerText = "📋 COPY TICKERS", 2200);
+            }}
+        }});
+        </script>
+        ''',
+        height=62
+    )
+
     csv=f.to_csv(index=False).encode('utf-8')
     st.download_button('📥 Download CSV',csv,file_name=f"minervini_scan_{datetime.now():%Y-%m-%d}.csv",mime='text/csv',use_container_width=True)
