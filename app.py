@@ -206,7 +206,7 @@ def run_scan(progress):
     if vdf.empty:
         final=pd.DataFrame(columns=list(cand.columns)+['VCP Passed','VCP Score','Base Range %','Range Position %','ATR Change %','Volume Change %'])
     else:
-        final=cand.merge(vdf,on='Symbol',how='inner'); final=final[final.VCP_Score>=MIN_VCP].copy()
+        final=cand.merge(vdf,on='Symbol',how='inner'); final = final[final["VCP Score"] >= MIN_VCP_SCORE].copy()
     final=final.sort_values(['Leader_Score','VCP Score'],ascending=False).reset_index(drop=True)
     final.Symbol=final.Symbol.str.replace('.NS','',regex=False)
     progress(1.0,f'Scan complete: {len(final)} final candidates')
