@@ -281,7 +281,7 @@ if st.button('🔄 REFRESH SCAN',type='primary',use_container_width=True):
 
 if st.session_state.results is not None:
     f=st.session_state.results; m=st.session_state.meta
-    st.subheader('NSE Universe Status')
+    st.markdown('<div class="section-title">NSE UNIVERSE & SCAN PIPELINE</div>', unsafe_allow_html=True)
     st.caption(
         f"Universe refreshed automatically from NSE at {m['universe_refreshed']}. "
         "No manual stock-list maintenance is required."
@@ -299,7 +299,11 @@ if st.session_state.results is not None:
             "(for example insufficient history or unavailable Yahoo Finance data)."
         )
 
-    st.subheader('Final candidates'); st.dataframe(f,use_container_width=True,hide_index=True)
+    st.markdown(
+        f'<div class="section-title">🎯 FINAL CANDIDATES <span class="status-pill">{len(f)} stocks</span></div>',
+        unsafe_allow_html=True
+    )
+    st.dataframe(f,use_container_width=True,hide_index=True)
 
     # One-click comma-separated ticker list for Dhan.
     tickers = [str(x).replace('.NS', '').strip() for x in f['Symbol'].tolist()]
