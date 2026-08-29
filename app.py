@@ -1,5 +1,6 @@
 import smtplib
 import time
+import requests
 from datetime import datetime
 from email.message import EmailMessage
 
@@ -20,11 +21,48 @@ MIN_VCP = 80.0
 BATCH = 100
 
 
+NSE_UNIVERSE_URL = 'https://archives.nseindia.com/content/equities/EQUITY_L.csv'
+
+
 def nse_universe():
-    df = pd.read_csv('https://archives.nseindia.com/content/equities/EQUITY_L.csv')
+    # Refresh the current NSE equity universe every time REFRESH SCAN is clicked.
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                          'AppleWebKit/537.36 Chrome/151.0 Safari/537.36',
+            'Accept': 'text/csv,*/*'
+        }
+        response = requests.get(NSE_UNIVERSE_URL, headers=headers, timeout=30)
+        response.raise_for_status()
+
+        from io import StringIO
+        df = pd.read_csv(StringIO(response.text))
+    except Exception as e:
+        raise RuntimeError(f'Could not refresh the NSE universe: {e}')
+
     df.columns = df.columns.str.strip()
-    df = df[df['SERIES'].astype(str).str.strip().eq('EQ')].drop_duplicates('SYMBOL').copy()
-    df['YF_SYMBOL'] = df['SYMBOL'].astype(str).str.strip() + '.NS'
+
+    required = {'SYMBOL', 'SERIES'}
+    missing = required - set(df.columns)
+    if missing:
+        raise RuntimeError(
+            f'NSE universe file format changed. Missing columns: {sorted(missing)}'
+        )
+
+    df['SYMBOL'] = df['SYMBOL'].astype(str).str.strip()
+    df['SERIES'] = df['SERIES'].astype(str).str.strip()
+
+    # Scan only NSE main-board EQ securities.
+    df = df[df['SERIES'].eq('EQ')].drop_duplicates('SYMBOL').copy()
+
+    # Build Yahoo Finance symbols from the freshly downloaded NSE list.
+    df['YF_SYMBOL'] = df['SYMBOL'] + '.NS'
+
+    df = df[df['SYMBOL'].ne('') & df['YF_SYMBOL'].ne('.NS')].copy()
+
+    if df.empty:
+        raise RuntimeError('NSE returned an empty EQ universe.')
+
     return df
 
 
@@ -164,7 +202,9 @@ def email_csv(data, filename):
 
 
 def run_scan(progress):
-    universe=nse_universe(); symbols=universe.YF_SYMBOL.tolist()
+    universe=nse_universe()
+    universe_refreshed=datetime.now().strftime('%d-%b-%Y %H:%M:%S')
+    symbols=universe.YF_SYMBOL.tolist()
     nifty=nifty_close(); trend_rows=[]; rs_rows=[]
     batches=(len(symbols)+BATCH-1)//BATCH
     for start in range(0,len(symbols),BATCH):
@@ -211,7 +251,8 @@ def run_scan(progress):
     final=final.sort_values(['Leader_Score','VCP Score'],ascending=False).reset_index(drop=True)
     final.Symbol=final.Symbol.str.replace('.NS','',regex=False)
     progress(1.0,f'Scan complete: {len(final)} final candidates')
-    return final,len(symbols),len(trend_df),len(rs_df),len(board)
+    failed=max(0,len(symbols)-len(trend_df))
+    return final,len(symbols),len(trend_df),len(rs_df),len(board),failed,universe_refreshed
 
 st.sidebar.header('Scanner rules')
 st.sidebar.write(f'Trend Score ≥ {MIN_TREND}')
@@ -227,8 +268,8 @@ if st.button('🔄 REFRESH SCAN',type='primary',use_container_width=True):
     def progress(v,m): bar.progress(min(max(v,0),1)); status.info(m)
     try:
         with st.spinner('Running full NSE scan…'):
-            final,n,tr,rsn,leaders=run_scan(progress)
-        st.session_state.results=final; st.session_state.meta={'universe':n,'trend':tr,'rs':rsn,'leaders':leaders}
+            final,n,tr,rsn,leaders,failed,universe_refreshed=run_scan(progress)
+        st.session_state.results=final; st.session_state.meta={'universe':n,'trend':tr,'rs':rsn,'leaders':leaders,'failed':failed,'universe_refreshed':universe_refreshed}
         st.success('Scan completed successfully.')
         csv=final.to_csv(index=False).encode('utf-8'); fn=f"minervini_scan_{datetime.now():%Y-%m-%d}.csv"
         try:
@@ -240,8 +281,24 @@ if st.button('🔄 REFRESH SCAN',type='primary',use_container_width=True):
 
 if st.session_state.results is not None:
     f=st.session_state.results; m=st.session_state.meta
+    st.subheader('NSE Universe Status')
+    st.caption(
+        f"Universe refreshed automatically from NSE at {m['universe_refreshed']}. "
+        "No manual stock-list maintenance is required."
+    )
     c1,c2,c3,c4,c5=st.columns(5)
-    c1.metric('NSE EQ',m['universe']); c2.metric('Trend',m['trend']); c3.metric('RS',m['rs']); c4.metric('Common',m['leaders']); c5.metric('Final VCP',len(f))
+    c1.metric('NSE EQ',m['universe'])
+    c2.metric('Trend analysed',m['trend'])
+    c3.metric('RS analysed',m['rs'])
+    c4.metric('Trend + RS common',m['leaders'])
+    c5.metric('Final VCP',len(f))
+
+    if m['failed'] > 0:
+        st.info(
+            f"{m['failed']} NSE EQ symbols did not produce a valid Trend result "
+            "(for example insufficient history or unavailable Yahoo Finance data)."
+        )
+
     st.subheader('Final candidates'); st.dataframe(f,use_container_width=True,hide_index=True)
 
     # One-click comma-separated ticker list for Dhan.
